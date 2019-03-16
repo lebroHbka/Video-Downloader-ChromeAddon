@@ -1,0 +1,21 @@
+{
+  "name": "Video Downloader",
+  "version": "0.1",
+  "description": "Download video from sites",
+  "permissions": [
+    "downloads"
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "images/icon_128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["ContentScript/contentScript.js"]
+    }
+  ],
+  "manifest_version": 2
+}

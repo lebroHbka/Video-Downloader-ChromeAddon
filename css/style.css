@@ -1,0 +1,11 @@
+body {
+    margin: 5px 10px;
+}
+#main {
+    width: 100px;
+}
+
+#downloadBtn {
+    display: block;
+    margin: 0 auto;
+ }
