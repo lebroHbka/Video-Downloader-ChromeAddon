@@ -1,4 +1,5 @@
 
+
 var managerInitialized = false;
 
 
@@ -36,12 +37,18 @@ function downloadCurrentVideo() {
     }
 }
 
+function subscribeForEvents() {
+    document.getElementById('downloadBtn').addEventListener('click', downloadCurrentVideo);
+}
+
 function initializeManager() {
     sendMsg({type: "initializeManager"}, (r) => {console.log("manager initialized");managerInitialized = true;});
 }
 
 initializeManager();
 
-document.getElementById('downloadBtn').addEventListener('click', downloadCurrentVideo);
+subscribeForEvents();
+
+
 
 //document.getElementById('downloadBtn').addEventListener('click', testMessage);

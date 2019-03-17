@@ -12,7 +12,7 @@ class LinkedInVideoItem {
     _videoDownloadLink = "";    // <source> link from page
     _isVideoSourceLoaded = false;
     _videoName = "";
-    _downloadFromLinkPromise;
+    _downloadFromLinkPromise;   // promise return html page
 
 
     constructor(domNode) {
@@ -25,11 +25,13 @@ class LinkedInVideoItem {
 
     getLinkForDownloadAsync(callBack) {
         if(!this.isVideoDownloadable) {
-            callBack();
+            callBack({error: "videoIsNotDownloadable"});
         } else if(this._isVideoSourceLoaded) {
-            callBack(this._videoDownloadLink);
+            callBack(this.videoDownloadLink);
         } else {
-            this._downloadFromLinkPromise.then(callBack);
+            this._downloadFromLinkPromise.then(() => {
+                callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
+            });
         }
     }
 
@@ -73,15 +75,29 @@ class LinkedInVideoItem {
     }
 
     _videoSourcePageDownloaded(htmlPage){
-        this._getVideoSource(htmlPage);     // now this._videoDownloadLink is initialized
+        this.videoDownloadLink = this._getVideoSource(htmlPage);     // now this._videoDownloadLink is initialized
         this._isVideoSourceLoaded = true;
     }
 
     _getVideoSource(htmlPage) {
         let matches;
+        let link;
         while((matches = LinkedInVideoItem.sourceVideoPattern.exec(htmlPage)) !== null) {
-            this._videoDownloadLink = matches[1];
+            link = matches[1];
         }
+        return link;
+    }
+
+    set videoDownloadLink(value) {
+        if (!value) {
+            console.error("Video download link is null or empty");
+        } else {
+            this._videoDownloadLink = value;
+        }
+    }
+
+    get videoDownloadLink() {
+        return this._videoDownloadLink;
     }
 
 }
@@ -93,6 +109,8 @@ class LinkedInVideoManager {
     _videoNodes;
     _initializeManagerSyncInterval = 500;
     _initializeManagerMaxRepeatTimes = 5;
+    _inManagerInitialized = false;
+    _managerInitializePromise;
 
     constructor() {
         this._initializeManagerAsync(this._prepareVideos.bind(this));
