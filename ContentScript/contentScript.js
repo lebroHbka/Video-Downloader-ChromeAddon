@@ -8,31 +8,18 @@ class LinkedInVideoItem {
     domNode;
     isVideoDownloadable = false;
 
-    _videoSourcePage = "";      // link <a> from DOM node video element
+    _videoSourcePageLink = "";      // link <a> from DOM node video element
     _videoDownloadLink = "";    // <source> link from page
-    _isVideoSourceLoaded = false;
     _videoName = "";
-    _downloadFromLinkPromise;   // promise return html page
+    _videoDownloadPagePromise;   // promise return html page
 
 
     constructor(domNode) {
         this.domNode = domNode;         // dom element with .video-item
-        this._videoSourcePage = this.domNode.querySelector("a").href;
+        this._videoSourcePageLink = this.domNode.querySelector("a").href;
 
         this._configureIsVideoDownloadable();
         this._downloadVideoPage();
-    }
-
-    getLinkForDownloadAsync(callBack) {
-        if(!this.isVideoDownloadable) {
-            callBack({error: "videoIsNotDownloadable"});
-        } else if(this._isVideoSourceLoaded) {
-            callBack(this.videoDownloadLink);
-        } else {
-            this._downloadFromLinkPromise.then(() => {
-                callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
-            });
-        }
     }
 
     get videoName() {
@@ -40,52 +27,6 @@ class LinkedInVideoItem {
             this._videoName = this.domNode.querySelector(".toc-item__content").firstChild.textContent;
         }
         return this._videoName;
-    }
-
-    _configureIsVideoDownloadable() {
-        if (!this.domNode.querySelector(LinkedInVideoItem.checkLockPattern)) {
-            this.isVideoDownloadable = true;
-        }
-    }
-
-    _downloadVideoPage() {
-        if(!this.isVideoDownloadable) {
-            this._isVideoSourceLoaded = true;
-            return;
-        }
-
-        this._downloadFromLinkPromise = this._getPromiseDownloadFromLink();
-        this._downloadFromLinkPromise.then(this._videoSourcePageDownloaded.bind(this), (status) => {console.error(`getPromiseDownloadFromLink (finished with code ${status})`);});
-    }
-
-    _getPromiseDownloadFromLink() {
-        var promise = new Promise((resolve, rejected) => {
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", this._videoSourcePage, true);
-            xhr.onload = function() {
-                if(this.status === 200) {
-                    resolve(this.responseText);
-                } else {
-                    rejected(this)
-                }
-            };
-            xhr.send();
-        });
-        return promise;
-    }
-
-    _videoSourcePageDownloaded(htmlPage){
-        this.videoDownloadLink = this._getVideoSource(htmlPage);     // now this._videoDownloadLink is initialized
-        this._isVideoSourceLoaded = true;
-    }
-
-    _getVideoSource(htmlPage) {
-        let matches;
-        let link;
-        while((matches = LinkedInVideoItem.sourceVideoPattern.exec(htmlPage)) !== null) {
-            link = matches[1];
-        }
-        return link;
     }
 
     set videoDownloadLink(value) {
@@ -100,39 +41,79 @@ class LinkedInVideoItem {
         return this._videoDownloadLink;
     }
 
+
+
+    getLinkForDownloadAsync(callBack) {
+        if(!this.isVideoDownloadable) {
+            callBack({error: "videoIsNotDownloadable"});
+        } else {
+            this._videoDownloadPagePromise.then(() => {
+                callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
+            });
+        }
+    }
+
+    _configureIsVideoDownloadable() {
+        if (!this.domNode.querySelector(LinkedInVideoItem.checkLockPattern)) {
+            this.isVideoDownloadable = true;
+        }
+    }
+
+    _downloadVideoPage() {
+        if(!this.isVideoDownloadable) {
+            return;
+        }
+
+        this._videoDownloadPagePromise = this._getVideoDownloadPagePromise();
+        this._videoDownloadPagePromise.then(this._afterVideoPageDownloaded.bind(this), (status) => {console.error(`getPromiseDownloadFromLink (finished with code ${status})`);});
+    }
+
+    _getVideoDownloadPagePromise() {
+        var promise = new Promise((resolve, rejected) => {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", this._videoSourcePageLink, true);
+            xhr.onload = function() {
+                if(this.status === 200) {
+                    resolve(this.responseText);
+                } else {
+                    rejected(this)
+                }
+            };
+            xhr.send();
+        });
+        return promise;
+    }
+
+    _afterVideoPageDownloaded(htmlPage){
+        this.videoDownloadLink = this._getVideoDownloadLink(htmlPage);     // now this._videoDownloadLink is initialized
+    }
+
+    _getVideoDownloadLink(htmlPage) {
+        let matches;
+        let link;
+        while((matches = LinkedInVideoItem.sourceVideoPattern.exec(htmlPage)) !== null) {
+            link = matches[1];
+        }
+        return link;
+    }
+
 }
 
 
 class LinkedInVideoManager {
-    _videoList = [];
+    static videoManager;
+    _videoItemsList = [];
     _videoItemPattern = ".video-item";
     _videoNodes;
     _initializeManagerSyncInterval = 500;
     _initializeManagerMaxRepeatTimes = 5;
-    _inManagerInitialized = false;
-    _managerInitializePromise;
+    _videoNodesInitializePromise;
 
-    constructor() {
-        this._initializeManagerAsync(this._prepareVideos.bind(this));
-    }
-
-    getVideoUrlByNumberAsync(number, callBack) {
-        if (!this._videoList[number]) {
-            callBack();
-        } else {
-            this._videoList[number].getLinkForDownloadAsync(callBack);
+    static getVideoManager() {
+        if(!this.videoManager) {
+            this.videoManager = new LinkedInVideoManager();
         }
-    }
-
-    getCurrentVideoUrlAsync(callBack) {
-        let number = this._findVideoNumberOfCurrentPage();
-        if (number !== undefined) {
-            this.getVideoUrlByNumberAsync(number, callBack);
-        }
-    }
-
-    getAllVideosUrlsAsync(callBack) {
-
+        return this.videoManager;
     }
 
     get videoNodes() {
@@ -143,23 +124,68 @@ class LinkedInVideoManager {
     }
 
 
-    _initializeManagerAsync(callBack, repeatNumber = 0) {
-        if(this.videoNodes.length) {
-            callBack();
-            return;
-        }
-
-        if(repeatNumber < this._initializeManagerMaxRepeatTimes) {
-            setTimeout(this._initializeManagerAsync.bind(this, callBack, repeatNumber + 1), this._initializeManagerSyncInterval);
-        } else {
-            console.error("Video manager hasn't been initialize, or no video items in page")
-        }
+    constructor() {
+        this._initializeVideoItemsAsync();
     }
 
-    _prepareVideos() {
+    getVideoUrlByNumberAsync(number, callBack) {
+        this._videoNodesInitializePromise.then(() => {
+            if (!this._videoItemsList[number]) {
+                callBack({error: "No video with such number"});
+            } else {
+                this._videoItemsList[number].getLinkForDownloadAsync(callBack);
+            }
+        });
+
+    }
+
+    getCurrentVideoUrlAsync(callBack) {
+        this._videoNodesInitializePromise.then(() => {
+            let number = this._findVideoNumberOfCurrentPage();
+            if (number !== undefined) {
+                this.getVideoUrlByNumberAsync(number, callBack);
+            }
+        });
+
+    }
+
+    getAllVideosUrlsAsync(callBack) {
+        // after initialize
+    }
+
+
+    _initializeVideoItemsAsync() {
+        this._videoNodesInitializePromise = this._getVideoNodesInitializePromise();
+        this._videoNodesInitializePromise.then(this._initializeVideoItemsList.bind(this), this._videoItemsNotFound.bind(this));
+
+    }
+
+    _getVideoNodesInitializePromise() {
+        let promise = new Promise((resolve, reject) => {
+            let recurInitializeFunc = (repeatNumber) => {
+                if(repeatNumber >= this._initializeManagerMaxRepeatTimes) {
+                    reject();
+                    return;
+                }
+
+                if(this.videoNodes.length) {
+                    resolve();
+                }
+                 else {
+                    setTimeout(recurInitializeFunc.bind(this,repeatNumber + 1), this._initializeManagerSyncInterval);
+                }
+            };
+
+            setTimeout(recurInitializeFunc.bind(this, 0), this._initializeManagerSyncInterval);
+        });
+
+        return promise;
+    }
+
+    _initializeVideoItemsList() {
         for (let i = 0; i < this.videoNodes.length; i++) {
             let videoNode = new LinkedInVideoItem(this.videoNodes[i]);
-            this._videoList.push(videoNode);
+            this._videoItemsList.push(videoNode);
         }
     }
 
@@ -174,6 +200,10 @@ class LinkedInVideoManager {
         return currentPageNumber;
     }
 
+    _videoItemsNotFound() {
+        console.error(`Video items wasn't found with pattern "${this._videoItemPattern}"`);
+    }
+
 }
 //endregion
 
@@ -184,7 +214,7 @@ var videoManager;
 function initializeManager(sendResponse) {
     switch (document.domain) {
         case "www.linkedin.com":
-            videoManager = new LinkedInVideoManager();
+            videoManager = LinkedInVideoManager.getVideoManager();
             break;
     }
     sendResponse();
