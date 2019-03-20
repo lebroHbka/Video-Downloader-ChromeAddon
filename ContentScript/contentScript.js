@@ -48,7 +48,7 @@ class LinkedInVideoItem {
             callBack({error: "videoIsNotDownloadable"});
         } else {
             this._videoDownloadPagePromise.then(() => {
-                callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
+               callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
             });
         }
     }
@@ -90,30 +90,70 @@ class LinkedInVideoItem {
 
     _getVideoDownloadLink(htmlPage) {
         let matches;
-        let link;
+        let links = [];
+        let result, name;
         while((matches = LinkedInVideoItem.sourceVideoPattern.exec(htmlPage)) !== null) {
-            link = matches[1];
+            links.push(matches[1]);
         }
-        return link;
+        result = this._filterVideoLinkByRules(links, this.videoName.split(" "));
+        return result;
     }
 
+    _filterVideoLinkByRules(links, words) {
+        let result;
+        result = links.filter((link) => {
+            return this._filterVideoLinkRule1(link, words);
+        });
+
+        if (result.length === 1) {
+            return result[0];
+        }
+
+        result = links.filter((link) => {
+            return this._filterVideoLinkRule2(link, words);
+        });
+
+        if (result.length === 1) {
+            return result[0];
+        }
+
+    }
+
+    _filterVideoLinkRule1(link, words) {
+        let match = 0;
+        let tlink = link.toLowerCase();
+        let tWords = words.map((w) => w.toLowerCase());
+        let minWordsMatchCount = tWords.length > 2 ? 2 : 1;
+
+        for (let i = 0; i < words.length; i++) {
+            if (~tlink.indexOf(tWords[i])) {
+                match++;
+            }
+        }
+        return match >= minWordsMatchCount;
+    }
+
+    _filterVideoLinkRule2(link, words) {
+        let tlink = link.toLowerCase();
+        return words.some((w) => tlink.indexOf(w.toLowerCase() > -1));
+    }
 }
 
 
 class LinkedInVideoManager {
-    static videoManager;
+    static _videoManager;
     _videoItemsList = [];
     _videoItemPattern = ".video-item";
     _videoNodes;
     _initializeManagerSyncInterval = 500;
-    _initializeManagerMaxRepeatTimes = 5;
+    _initializeManagerMaxRepeatTimes = 10;
     _videoNodesInitializePromise;
 
-    static getVideoManager() {
-        if(!this.videoManager) {
-            this.videoManager = new LinkedInVideoManager();
+    static get defaultVideoManager() {
+        if(!this._videoManager) {
+            this._videoManager = new LinkedInVideoManager();
         }
-        return this.videoManager;
+        return this._videoManager;
     }
 
     get videoNodes() {
@@ -208,61 +248,79 @@ class LinkedInVideoManager {
 //endregion
 
 
-var videoManager;
 
+class AddonRunner {
 
-function initializeManager(sendResponse) {
-    switch (document.domain) {
-        case "www.linkedin.com":
-            videoManager = LinkedInVideoManager.getVideoManager();
-            break;
+    _videoManager;
+
+    start() {
+        this._subscribeForMessages();
     }
-    sendResponse();
-}
 
-function responseCurrentDomain(sendResponse) {
-    sendResponse(document.domain);
-}
 
-function responseNoSuchMsgType(sendResponse) {
-    sendResponse({error: "responseNoSuchMsgType"})
-}
-
-function responseGetVideoUrlByNumber(request, sendResponse) {
-    if(!videoManager) {
-        sendResponse();
-        return;
+    _subscribeForMessages() {
+        chrome.runtime.onMessage.addListener(
+            (request, sender, sendResponse) => {
+                switch(request.type){
+                    case "getDomain":
+                        this._responseCurrentDomain(sendResponse.bind(this));
+                        break;
+                    case "getVideoUrlByNumber":
+                        this._responseGetVideoUrlByNumber(request, sendResponse.bind(this));
+                        break;
+                    case "getCurrentVideoUrl":
+                        this._responseGetCurrentVideoUrl(sendResponse.bind(this));
+                        break;
+                    case "initializeManager":
+                        this._initializeManager(sendResponse.bind(this));
+                        break;
+                    default:
+                        this._responseNoSuchMsgType(sendResponse.bind(this));
+                        break;
+                }
+                return true;
+            });
     }
-    if (typeof request.number === "number") {
-        videoManager.getVideoUrlByNumberAsync(request.number, sendResponse);
-    } else {
-        console.error(`message 'downloadVideo' has incorrect request.number - ${request.number}`);
+
+    _responseCurrentDomain(sendResponse) {
+        sendResponse(document.domain);
     }
-}
 
-function responseGetCurrentVideoUrl(sendResponse) {
-    videoManager.getCurrentVideoUrlAsync(sendResponse);
-}
+    _responseGetVideoUrlByNumber(request, sendResponse) {
+        if(!this._videoManager) {
+            sendResponse();
+            return;
+        }
+        if (typeof request.number === "number") {
+            this._videoManager.getVideoUrlByNumberAsync(request.number, sendResponse);
+        } else {
+            console.error(`message 'downloadVideo' has incorrect request.number - ${request.number}`);
+        }
+    }
 
-chrome.runtime.onMessage.addListener(
-    function(request, sender, sendResponse) {
-        switch(request.type){
-            case "getDomain":
-                responseCurrentDomain(sendResponse.bind(this));
-                break;
-            case "getVideoUrlByNumber":
-                responseGetVideoUrlByNumber(request, sendResponse.bind(this));
-                break;
-            case "getCurrentVideoUrl":
-                responseGetCurrentVideoUrl(sendResponse.bind(this));
-                break;
-            case "initializeManager":
-                initializeManager(sendResponse.bind(this));
-                break;
-            default:
-                responseNoSuchMsgType(sendResponse.bind(this));
+    _responseGetCurrentVideoUrl(sendResponse) {
+        this._videoManager.getCurrentVideoUrlAsync(sendResponse);
+    }
+
+    _initializeManager(sendResponse) {
+        switch (document.domain) {
+            case "www.linkedin.com":
+                this._videoManager = LinkedInVideoManager.defaultVideoManager;
                 break;
         }
-    });
+        console.log("initialized");
+        sendResponse();
+    }
+
+    _responseNoSuchMsgType(sendResponse) {
+        sendResponse({error: "responseNoSuchMsgType"})
+    }
+}
+
+
+
+
+
+new AddonRunner().start();
 
 
