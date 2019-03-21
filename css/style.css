@@ -2,10 +2,10 @@ body {
     margin: 5px 10px;
 }
 #main {
-    width: 150px;
+    width: 200px;
 }
 
-#downloadBtn {
+.btn {
     display: block;
-    margin: 0 auto;
+    margin: 5px auto;
  }

@@ -10,9 +10,12 @@ class ChromeAddon {
     }
 
     downloadCurrentVideo() {
-        this._sendTabMsg({type: "getCurrentVideoUrl"}, (response) => {
-            this._download(response, () => {
-            })
+        this._sendTabMsgAsync({type: "getCurrentVideoUrl"}).then(this._downloadAsync.bind(this));
+    }
+
+    downloadAllDownloadableVideos() {
+        this._sendTabMsgAsync({type: "getAllDownloadableVideosUrls"}).then(urlsArr => {
+            urlsArr.forEach(url => this._downloadAsync(url));
         });
     }
 
@@ -27,18 +30,13 @@ class ChromeAddon {
     }
 
     _initManager() {
-        this._sendInitManagerMsg();
         this._subscribeForEvents();
-    }
-
-    _sendInitManagerMsg() {
-        this._sendTabMsg({type: "initializeManager"}, (r) => {
-            console.log("manager initialized");
-        });
+        this._updateVideoNamesList();
     }
 
     _subscribeForEvents() {
-        document.getElementById('downloadBtn').addEventListener('click', this.downloadCurrentVideo.bind(this));
+        document.getElementById('downloadBtn').addEventListener("click", this.downloadCurrentVideo.bind(this));
+        document.getElementById('downloadAllBtn').addEventListener("click", this.downloadAllDownloadableVideos.bind(this));
     }
 
     _subscribeForTabEvents() {
@@ -50,26 +48,42 @@ class ChromeAddon {
         });
     }
 
-    _sendTabMsg(msg, callBack) {
-        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            let tab = tabs[0].id;
-            chrome.tabs.sendMessage(tab, msg, function (response) {
-                if (response && response.error) {
-                    console.error(`Message with type "${msg.type}" ended with error - "${response.error}"`);
-                    return;
-                }
-                callBack(response);
+    _sendTabMsgAsync(msg) {
+        return new Promise(resolve => {
+            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+                let tab = tabs[0].id;
+                chrome.tabs.sendMessage(tab, msg, function (response) {
+                    if (response && response.error) {
+                        console.error(`Message with type "${msg.type}" ended with error - "${response.error}"`);
+                        return;
+                    }
+                    resolve(response);
+                });
             });
         });
-
     }
 
-    _download(url, callBack) {
-        if (!url) {
-            console.error(`url is: "${url}" manager isn't initialize"`);
-        } else {
-            chrome.downloads.download({"url": url}, callBack);
-        }
+    _downloadAsync(url) {
+        return new Promise(resolve => {
+            if (!url) {
+                console.error(`url is: "${url}" manager isn't initialize"`);
+            } else {
+                chrome.downloads.download({"url": url}, resolve);
+            }
+        });
+    }
+
+    _downloadVideosNamesPromise() {
+        return new Promise((resolve) => {
+            this._sendTabMsgAsync({type: "getVideoNamesList"}).then(resolve.bind(this));
+        });
+    }
+
+    _updateVideoNamesList() {
+        this._downloadVideosNamesPromise().then(videosList=> {
+            let videos = `<hr/> ${videosList.join("\n<hr/>")} <hr/>`;
+            document.getElementById("list").innerHTML = videos;
+        });
     }
 }
 

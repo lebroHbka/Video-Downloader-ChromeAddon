@@ -3,6 +3,7 @@
 //region LinkedIn Classes
 class LinkedInVideoItem {
     static sourceVideoPattern = /(https\:\/\/files\d+\.lynda\.com\/secure\/courses\/\d{1,10}\/VBR_MP4h264.+?)&quot/gi;
+    static videoLinkNameWithoutQuery = /https\:\/\/files\d+\.lynda\.com\/secure\/courses\/\d{1,10}\/VBR_MP4h264.+?\.mp4/i;
     static checkLockPattern = "li-icon[type='lock-icon']";
 
     domNode;
@@ -43,14 +44,16 @@ class LinkedInVideoItem {
 
 
 
-    getLinkForDownloadAsync(callBack) {
-        if(!this.isVideoDownloadable) {
-            callBack({error: "videoIsNotDownloadable"});
-        } else {
-            this._videoDownloadPagePromise.then(() => {
-               callBack(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
-            });
-        }
+    getLinkForDownloadAsync() {
+        return new Promise(resolve => {
+            if(!this.isVideoDownloadable) {
+                resolve({error: "videoIsNotDownloadable"});
+            } else {
+                this._videoDownloadPagePromise.then(() => {
+                    resolve(this.videoDownloadLink)        // videoDownloadLink is initialized in previous promise stage
+                });
+            }
+        });
     }
 
     _configureIsVideoDownloadable() {
@@ -91,9 +94,12 @@ class LinkedInVideoItem {
     _getVideoDownloadLink(htmlPage) {
         let matches;
         let links = [];
-        let result, name;
+        let result;
         while((matches = LinkedInVideoItem.sourceVideoPattern.exec(htmlPage)) !== null) {
             links.push(matches[1]);
+        }
+        if(!links.length) {
+            console.error("Links was not found in html page");
         }
         result = this._filterVideoLinkByRules(links, this.videoName.split(" "));
         return result;
@@ -101,22 +107,48 @@ class LinkedInVideoItem {
 
     _filterVideoLinkByRules(links, words) {
         let result;
-        result = links.filter((link) => {
-            return this._filterVideoLinkRule1(link, words);
-        });
+        let applyVideoFilterRule = function(func) {
+            let result;
+            if (this.length === 1) {
+                return this;
+            }
 
-        if (result.length === 1) {
-            return result[0];
+            result = this.filter((link) => {
+                return func(link, words);
+            });
+
+            if(result.length !== 0) {
+                return result;
+            }
+            return this;
+        };
+
+        result = this._filterVideoLinkRule0(links);
+        [].__proto__._applyVideoFilterRule = applyVideoFilterRule;
+
+        result = result._applyVideoFilterRule(this._filterVideoLinkRule1)
+                      ._applyVideoFilterRule(this._filterVideoLinkRule2);
+
+        delete [].__proto__._applyVideoFilterRule;
+
+        if(result.length !== 1) {
+            console.error("Links not filtered by rules");
+            debugger;
         }
 
-        result = links.filter((link) => {
-            return this._filterVideoLinkRule2(link, words);
+        return result[0];
+    }
+
+    _filterVideoLinkRule0(linksArray) {
+        let simplifyLinks = linksArray.map((link) => {
+            return LinkedInVideoItem.videoLinkNameWithoutQuery.exec(link)[0];
         });
 
-        if (result.length === 1) {
-            return result[0];
+        if ( [...new Set(simplifyLinks)].length === 1) {
+            return [linksArray[0]];
+        } else {
+            return linksArray;
         }
-
     }
 
     _filterVideoLinkRule1(link, words) {
@@ -135,7 +167,7 @@ class LinkedInVideoItem {
 
     _filterVideoLinkRule2(link, words) {
         let tlink = link.toLowerCase();
-        return words.some((w) => tlink.indexOf(w.toLowerCase() > -1));
+        return words.some((w) => tlink.indexOf(w.toLowerCase()) > -1);
     }
 }
 
@@ -168,29 +200,56 @@ class LinkedInVideoManager {
         this._initializeVideoItemsAsync();
     }
 
-    getVideoUrlByNumberAsync(number, callBack) {
-        this._videoNodesInitializePromise.then(() => {
-            if (!this._videoItemsList[number]) {
-                callBack({error: "No video with such number"});
-            } else {
-                this._videoItemsList[number].getLinkForDownloadAsync(callBack);
-            }
+    getVideoUrlByNumberAsync(number) {
+        return new Promise(resolve => {
+            this._videoNodesInitializePromise.then(() => {
+                if (!this._videoItemsList[number]) {
+                    resolve({error: "No video with such number"});
+                } else {
+                    this._videoItemsList[number].getLinkForDownloadAsync().then(resolve);
+                }
+            });
         });
-
     }
 
-    getCurrentVideoUrlAsync(callBack) {
-        this._videoNodesInitializePromise.then(() => {
-            let number = this._findVideoNumberOfCurrentPage();
-            if (number !== undefined) {
-                this.getVideoUrlByNumberAsync(number, callBack);
-            }
+    getCurrentVideoUrlAsync() {
+        return new Promise(resolve => {
+            this._videoNodesInitializePromise.then(() => {
+                let number = this._findVideoNumberOfCurrentPage();
+                if (number !== undefined) {
+                    this.getVideoUrlByNumberAsync(number).then(resolve);
+                }
+            });
         });
-
     }
 
-    getAllVideosUrlsAsync(callBack) {
-        // after initialize
+    getAllDownloadableVideosUrlsAsync() {
+        return new Promise(resolve => {
+            this._videoNodesInitializePromise.then(() => {
+                let videoItemsPromisesList = [];
+                this._videoItemsList.forEach(v => {
+                    if(v.isVideoDownloadable) {
+                        videoItemsPromisesList.push(v.getLinkForDownloadAsync());
+                    }
+                });
+
+                Promise.all(videoItemsPromisesList).then((urlsArr) => {
+                    resolve(urlsArr);
+                });
+            });
+        });
+    }
+
+
+
+    getAllVideoNamesListAsync() {
+        return new Promise(resolve => {
+            this._videoNodesInitializePromise.then(() => {
+                let videosNames = this._videoItemsList.map((v) => v.videoName);
+                resolve(videosNames);
+            });
+        });
+
     }
 
 
@@ -254,6 +313,7 @@ class AddonRunner {
     _videoManager;
 
     start() {
+        this._initializeManager();
         this._subscribeForMessages();
     }
 
@@ -271,8 +331,11 @@ class AddonRunner {
                     case "getCurrentVideoUrl":
                         this._responseGetCurrentVideoUrl(sendResponse.bind(this));
                         break;
-                    case "initializeManager":
-                        this._initializeManager(sendResponse.bind(this));
+                    case "getAllDownloadableVideosUrls":
+                        this._responseGetAllDownloadableVideosUrls(sendResponse.bind(this));
+                        break;
+                    case "getVideoNamesList":
+                        this._responseGetVideoNamesList(sendResponse.bind(this));
                         break;
                     default:
                         this._responseNoSuchMsgType(sendResponse.bind(this));
@@ -292,24 +355,31 @@ class AddonRunner {
             return;
         }
         if (typeof request.number === "number") {
-            this._videoManager.getVideoUrlByNumberAsync(request.number, sendResponse);
+            this._videoManager.getVideoUrlByNumberAsync(request.number).then(sendResponse);
         } else {
             console.error(`message 'downloadVideo' has incorrect request.number - ${request.number}`);
         }
     }
 
     _responseGetCurrentVideoUrl(sendResponse) {
-        this._videoManager.getCurrentVideoUrlAsync(sendResponse);
+        this._videoManager.getCurrentVideoUrlAsync().then(sendResponse);
     }
 
-    _initializeManager(sendResponse) {
+    _initializeManager() {
         switch (document.domain) {
             case "www.linkedin.com":
                 this._videoManager = LinkedInVideoManager.defaultVideoManager;
                 break;
         }
         console.log("initialized");
-        sendResponse();
+    }
+
+    _responseGetVideoNamesList(sendResponse) {
+        this._videoManager.getAllVideoNamesListAsync().then(sendResponse);
+    }
+
+    _responseGetAllDownloadableVideosUrls(sendResponse) {
+        this._videoManager.getAllDownloadableVideosUrlsAsync().then(sendResponse);
     }
 
     _responseNoSuchMsgType(sendResponse) {
