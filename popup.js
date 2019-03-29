@@ -1,6 +1,6 @@
 
 
-class ChromeAddon {
+class ChromeAddOn {
 
     _isTabInitialized = false;
 
@@ -8,6 +8,8 @@ class ChromeAddon {
         this._init();
         this._subscribeForTabEvents();
     }
+
+    // region Public methods
 
     downloadCurrentVideo() {
         this._sendTabMsgAsync({type: "getCurrentVideoUrl"})
@@ -22,7 +24,10 @@ class ChromeAddon {
             }, this._sendingMsgToTabError);
     }
 
+    // endregion
 
+
+    //region Private methods
 
     _init() {
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
@@ -91,7 +96,10 @@ class ChromeAddon {
         });
     }
 
+    //endregion
 
+
+    //region Error messages
 
     _videoCantBeDownloadedError(url) {
         console.warn(`Video with url "${url}" can't be downloaded"`);
@@ -100,7 +108,9 @@ class ChromeAddon {
     _sendingMsgToTabError(error, msg) {
         console.warn(`Message with type "${msg}" ended with error - "${response.error}"`);
     }
+
+    //endregion
 }
 
-var ca = new ChromeAddon();
+new ChromeAddOn();
 

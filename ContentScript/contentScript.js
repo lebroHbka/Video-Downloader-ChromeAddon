@@ -42,7 +42,7 @@ class LinkedInVideoItem {
         return this._videoDownloadLink;
     }
 
-
+    // region Public methods
 
     getLinkForDownloadAsync() {
         return new Promise((resolve, rejected) => {
@@ -56,7 +56,10 @@ class LinkedInVideoItem {
         });
     }
 
+    // endregion
 
+
+    //region Private methods
 
     _configureIsVideoDownloadable() {
         if (!this.domNode.querySelector(LinkedInVideoItem.checkLockPattern)) {
@@ -100,7 +103,7 @@ class LinkedInVideoItem {
             links.push(matches[1]);
         }
         if(!links.length) {
-            console.error("Links was not found in html page");
+            this._noLinksInDownloadedPageError();
         }
         result = this._filterVideoLinkByRules(links, this.videoName.split(" "));
         return result;
@@ -133,7 +136,7 @@ class LinkedInVideoItem {
                        ._applyVideoFilterRule(this._filterVideoLinkRule3);
 
         if(result.length !== 1) {
-            console.error("Links not filtered by rules");
+            this._linksNotFilteredByRulesError();
         }
         delete [].__proto__._applyVideoFilterRule;
 
@@ -172,12 +175,27 @@ class LinkedInVideoItem {
     }
 
     _filterVideoLinkRule3(link) {
-        return !/.*welcom.*/.test(link);
+        return !/.*welcom.*/i.test(link);
     }
+
+    //endregion
+
+
+    // region Error messages
 
     _downloadVideoSourcePageError(response) {
         console.error(`getPromiseDownloadFromLink (finished with code ${response.status})`);
     }
+
+    _noLinksInDownloadedPageError() {
+        console.error("Links was not found in html page");
+    }
+
+    _linksNotFilteredByRulesError() {
+        console.error("Links not filtered by rules");
+    }
+
+    // endregion
 }
 
 
@@ -189,6 +207,11 @@ class LinkedInVideoManager {
     _initializeManagerSyncInterval = 500;
     _initializeManagerMaxRepeatTimes = 10;
     _videoNodesInitializePromise;
+
+
+    constructor() {
+        this._initializeVideoItemsAsync();
+    }
 
     static get defaultVideoManager() {
         if(!this._videoManager) {
@@ -205,9 +228,7 @@ class LinkedInVideoManager {
     }
 
 
-    constructor() {
-        this._initializeVideoItemsAsync();
-    }
+    //region Public methods
 
     getVideoUrlByNumberAsync(number) {
         return new Promise((resolve, rejected) => {
@@ -255,7 +276,10 @@ class LinkedInVideoManager {
         });
     }
 
+    //endregion
 
+
+    //region Private methods
 
     _initializeVideoItemsAsync() {
         this._videoNodesInitializePromise = this._getVideoNodesInitializePromise();
@@ -303,25 +327,37 @@ class LinkedInVideoManager {
         return currentPageNumber;
     }
 
+    //endregion
+
+
+    // region Error messages
 
     _videoNodesInitializeError() {
         console.error(`Video items wasn't found with pattern "${this._videoItemPattern}"`);
     }
+
+    //endregion
 
 }
 //endregion
 
 
 
-class AddonRunner {
+class AddOnRunner {
 
     _videoManager;
+
+    // region Public methods
 
     start() {
         this._initializeManager();
         this._subscribeForMessages();
     }
 
+    //endregion
+
+
+    //region Private methods
 
     _initializeManager() {
         switch (document.domain) {
@@ -393,7 +429,10 @@ class AddonRunner {
         sendResponse({error: "responseNoSuchMsgType"})
     }
 
+    //endregion
 
+
+    //region Error messages
 
     _getVideoUrlByNumberError(sendResponse, e) {
         console.error(`getVideoUrlByNumberAsync ended with error: "${e.error}"`);
@@ -410,12 +449,13 @@ class AddonRunner {
         sendResponse();
     }
 
+    //endregion
 }
 
 
 
 
 
-new AddonRunner().start();
+new AddOnRunner().start();
 
 
