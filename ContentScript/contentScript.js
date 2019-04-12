@@ -5,6 +5,7 @@ class LinkedInVideoItem {
     static sourceVideoPattern = /(https\:\/\/files\d+\.lynda\.com\/secure\/courses\/\d{1,10}\/VBR_MP4h264.+?)&quot/gi;
     static videoLinkNameWithoutQuery = /https\:\/\/files\d+\.lynda\.com\/secure\/courses\/\d{1,10}\/VBR_MP4h264.+?\/(.+?)\.mp4/i;
     static checkLockPattern = "li-icon[type='lock-icon']";
+    static blackListVideoName = [];     // need for _filterVideoLinkRule3
 
     domNode;
     isVideoDownloadable = false;
@@ -16,6 +17,10 @@ class LinkedInVideoItem {
 
 
     constructor(domNode) {
+        if(!domNode){
+            this._videoItemInitializedWithOutNode();
+            return;
+        }
         this.domNode = domNode;         // dom element with .video-item
         this._videoSourcePageLink = this.domNode.querySelector("a").href;
 
@@ -35,6 +40,7 @@ class LinkedInVideoItem {
             console.error("Video download link is null or empty");
         } else {
             this._videoDownloadLink = value;
+            LinkedInVideoItem.blackListVideoName.push(this._simplifyLinkName(value));
         }
     }
 
@@ -105,47 +111,28 @@ class LinkedInVideoItem {
         if(!links.length) {
             this._noLinksInDownloadedPageError();
         }
-        result = this._filterVideoLinkByRules(links, this.videoName.split(" "));
+        result = this._filterVideoLinkByRules(links);
         return result;
     }
 
-    _filterVideoLinkByRules(links, words) {
+    _filterVideoLinkByRules(links) {
         let result;
-        let applyVideoFilterRule = function(func) {
-            let result;
-            if (this.length === 1) {
-                return this;
-            }
 
-            result = this.filter((link) => {
-                let simplifyLink = LinkedInVideoItem.videoLinkNameWithoutQuery.exec(link)[1];
-                return func(simplifyLink, words);
-            });
-
-            if(result.length !== 0) {
-                return result;
-            }
-            return this;
-        };
-
-        [].__proto__._applyVideoFilterRule = applyVideoFilterRule;
-
-        result = this._filterVideoLinkRule0(links);
-        result = result._applyVideoFilterRule(this._filterVideoLinkRule1)
-                       ._applyVideoFilterRule(this._filterVideoLinkRule2)
-                       ._applyVideoFilterRule(this._filterVideoLinkRule3);
+        result = this._filterVideoLinkByDuplicate(links);
+        if (result.length > 1) {
+            result = result.filter(v => this._filterVideoLinkByBlackList(v));
+        }
 
         if(result.length !== 1) {
             this._linksNotFilteredByRulesError();
         }
-        delete [].__proto__._applyVideoFilterRule;
 
         return result[0];
     }
 
-    _filterVideoLinkRule0(linksArray) {
+    _filterVideoLinkByDuplicate(linksArray) {
         let simplifyLinks = linksArray.map((link) => {
-            return LinkedInVideoItem.videoLinkNameWithoutQuery.exec(link)[1];
+            return this._simplifyLinkName(link);
         });
 
         if ( [...new Set(simplifyLinks)].length === 1) {
@@ -155,27 +142,15 @@ class LinkedInVideoItem {
         }
     }
 
-    _filterVideoLinkRule1(link, words) {
-        let match = 0;
-        let tlink = link.toLowerCase();
-        let tWords = words.map((w) => w.toLowerCase());
-        let minWordsMatchCount = tWords.length > 2 ? 2 : 1;
-
-        for (let i = 0; i < words.length; i++) {
-            if (~tlink.indexOf(tWords[i])) {
-                match++;
-            }
-        }
-        return match >= minWordsMatchCount;
+    _filterVideoLinkByBlackList(link) {
+        let isSomeVideoInBlackList = LinkedInVideoItem.blackListVideoName.some((v) => {
+            return !!~link.indexOf(v);
+        });
+        return !isSomeVideoInBlackList;
     }
 
-    _filterVideoLinkRule2(link, words) {
-        let tlink = link.toLowerCase();
-        return words.some((w) => tlink.indexOf(w.toLowerCase()) > -1);
-    }
-
-    _filterVideoLinkRule3(link) {
-        return !/.*welcom.*/i.test(link);
+    _simplifyLinkName(link) {
+        return LinkedInVideoItem.videoLinkNameWithoutQuery.exec(link)[1];
     }
 
     //endregion
@@ -193,6 +168,10 @@ class LinkedInVideoItem {
 
     _linksNotFilteredByRulesError() {
         console.error("Links not filtered by rules");
+    }
+
+    _videoItemInitializedWithOutNode() {
+        console.error("Video item initialized without dom node in constructor");
     }
 
     // endregion
@@ -234,7 +213,7 @@ class LinkedInVideoManager {
         return new Promise((resolve, rejected) => {
             this._videoNodesInitializePromise.then(() => {
                 if (!this._videoItemsList[number]) {
-                    rejected({error: "No video with such number"});
+                    rejected({error: `No video with such number "${number}"`});
                 } else {
                     this._videoItemsList[number].getLinkForDownloadAsync().then(resolve, rejected);
                 }
@@ -243,25 +222,19 @@ class LinkedInVideoManager {
     }
 
     getCurrentVideoUrlAsync() {
-        return new Promise((resolve, rejected) => {
-            this._videoNodesInitializePromise.then(() => {
-                let number = this._findVideoNumberOfCurrentPage();
-                if (number !== undefined) {
-                    this.getVideoUrlByNumberAsync(number).then(resolve, rejected);
-                }
-            });
-        });
+        let number = this._findVideoNumberOfCurrentPage();
+        return this.getVideoUrlByNumberAsync(number);
     }
 
     getAllDownloadableVideosUrlsAsync() {
         return new Promise((resolve, rejected) => {
             this._videoNodesInitializePromise.then(() => {
                 let videoItemsPromisesList = [];
-                this._videoItemsList.forEach(v => {
-                    if(v.isVideoDownloadable) {
-                        videoItemsPromisesList.push(v.getLinkForDownloadAsync());
+                for (let i = 0; i < this._videoItemsList.length; i++) {
+                    if(this._videoItemsList[i].isVideoDownloadable) {
+                        videoItemsPromisesList.push(this.getVideoUrlByNumberAsync(i));
                     }
-                });
+                }
                 Promise.all(videoItemsPromisesList).then(resolve, rejected);
             });
         });
@@ -283,7 +256,8 @@ class LinkedInVideoManager {
 
     _initializeVideoItemsAsync() {
         this._videoNodesInitializePromise = this._getVideoNodesInitializePromise();
-        this._videoNodesInitializePromise.then(this._initializeVideoItemsList.bind(this), this._videoNodesInitializeError.bind(this));
+        this._videoNodesInitializePromise.then(this._initializeFirstVideo.bind(this))
+                                         .then(this._initializeVideoItemsList.bind(this), this._videoNodesInitializeError.bind(this));
 
     }
 
@@ -309,8 +283,19 @@ class LinkedInVideoManager {
         return promise;
     }
 
+    // need for initialize blackListVideoName in VideoItem
+    _initializeFirstVideo() {
+        let videoNode = new LinkedInVideoItem(this.videoNodes[0]);
+        this._videoItemsList.push(videoNode);
+        return new Promise(resolve => {
+            videoNode.getLinkForDownloadAsync().then(() => {
+                resolve();
+            });
+        });
+    }
+
     _initializeVideoItemsList() {
-        for (let i = 0; i < this.videoNodes.length; i++) {
+        for (let i = 1; i < this.videoNodes.length; i++) {
             let videoNode = new LinkedInVideoItem(this.videoNodes[i]);
             this._videoItemsList.push(videoNode);
         }
